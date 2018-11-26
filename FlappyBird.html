@@ -1,0 +1,124 @@
+<canvas id ="my-canvas" width="500" height="500">
+</canvas>
+<style>
+  canvas{
+    border: 1px solid black;
+  }
+</style>
+<script>
+
+  let mycanvas = document.getElementById("my-canvas");
+  let ctx = mycanvas.getContext("2d");
+
+  console.log(mycanvas);
+
+  let bird = {
+    x: 20,
+    y: 0,
+    vx: 0,
+    vy: 1,
+
+  }
+
+  let pipe = {
+    width: 20,
+    x: 500,
+    hole_start: 100,
+    hole_end: 250,
+    vx: 4,
+  }
+
+  let gravity = 0.1;
+  let score = 0;
+  let haveYouLost = false;
+
+  function isColliding(px, py, rx, ry, rw, rh) {
+    if(px<rx) {
+      return false;
+    }
+    if(py<ry) {
+      return false;
+    }
+    if(px>rx+rw) {
+      return false;
+    }
+    if(py > ry + rh) {
+      return false;
+    }
+    return true;
+  }
+
+  function isBirdCollidingWithPipe() {
+    if(isColliding(bird.x,bird.y,pipe.x,0, pipe.width, pipe.hole_start)) {
+      return true;
+    }
+    if(isColliding(bird.x,bird.y,pipe.x, pipe.hole_end, pipe.width, 500-pipe.hole_end)) {
+      return true;
+    }
+    return false;
+  }
+
+
+  function draw() {
+    ctx.fillRect(bird.x,bird.y,10,10);
+
+    ctx.fillRect(pipe.x,0, pipe.width, pipe.hole_start);
+    ctx.fillRect(pipe.x, pipe.hole_end, pipe.width, 500-pipe.hole_end);
+
+
+
+  }
+  function clear() {
+    ctx.clearRect(0,0,500,500);
+
+  }
+
+  function update() {
+    bird.x += bird.vx;
+    bird.y += bird.vy;
+    bird.vy += gravity;
+    pipe.x -= pipe.vx;
+
+
+    if(isBirdCollidingWithPipe()) {
+      haveYouLost = true;
+      alert("your score was " + score);
+    }
+
+    if(bird.y<0 || bird.y > 500) {
+      haveYouLost = true;
+      alert("your score was "+ score);
+    }
+
+    if(pipe.x< -pipe.width) {
+      pipe.x=500;
+      score++;
+
+      let newHoleStart = Math.random() *250+50;
+      let newHoleEnd = newHoleStart + 150;
+      pipe.hole_start = newHoleStart;
+      pipe.hole_end = newHoleEnd;
+      pipe.vx+=.1;
+    }
+  }
+
+  function frame() {
+    if(haveYouLost) {
+      return;
+    }
+    update();
+    clear();
+    draw();
+
+    console.log("frame");
+  }
+
+  setInterval(frame,1000/60);
+
+  function onKeyPress() {
+    bird.vy = -5;
+  }
+
+  document.addEventListener("keydown", onKeyPress);
+
+</script>
