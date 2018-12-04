@@ -1,0 +1,290 @@
+---
+title: "An Analysis of Philanthropic Behavior"
+subtitle: "Soc 225: Data & Society"
+author: "Joseph Schafer"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Research Question and Explanation
+  For my research project, I wanted to examine what motivates people to behave philanthropically, and specifically, from an aggregated societal standpoint, what makes some causes more likely to be donated to than others. For the average person, what factors are most influential in determining which causes receive aid?
+  
+  To answer this question, I used data from the philanthropic peer-to-peer lending site kiva.org, as they had data related to my research question which was easily accessible through their API and are a large philanthropic platform. In the context of their platform then, I wanted to see which attributes of loan recipients tended to be most indicative of the likelihood of their loan being funded. My dependent variable was the status of the loan (funded (successful) or expired(unsuccessful)), and my dependent variables were the aspects of the loan recipient.
+  A link to the data which I used for my analysis is provided here: http://build.kiva.org/docs/data/snapshots (I used the .csv files rather than the JSON files, although according to the API, both files include the same information)
+  
+# Set up of R environment and data
+
+### Initialize data and environment
+```{r}
+
+library(tidyverse) #Load in relevant libraries for my analysis later.
+library(ggthemes)
+library(gapminder)
+library(ggpmisc)
+theme_set(theme_minimal(base_family = "Times New Roman")) #Set the default theme for my visualizations.
+loans <- read_csv("data/loans.csv", progress = FALSE) #Read in the data from Kiva and store this in a data frame.
+```
+
+### View what information the data includes
+```{r}
+colnames(loans)
+```
+
+### Select only useful columns, and summarize their values
+```{r}
+loans <- loans %>% #Filter to only useful columns
+  select(FUNDED_AMOUNT,     #How much money was given
+         LOAN_AMOUNT,       #How much money was requested
+         STATUS,            #Whether the loan was funded
+         SECTOR_NAME,       #What the loan was used for
+         LOAN_USE,          #Description of specific loan usage.
+         COUNTRY_NAME,      #Country of loan recipient
+         PARTNER_ID,        #Lending partner
+         BORROWER_GENDERS)  #Gender of the recipient
+
+summary(loans) #Look at the data in each column and see what it's average values are, if it's numeric
+```
+
+### Clean and process the data
+```{r}
+loans <-
+  loans %>%
+  filter(BORROWER_GENDERS == "female"|
+         BORROWER_GENDERS == "male") #A very small subset of the loans are to groups, meaning that there are multiple recipients.
+                                     #Since I wanted to see if gender of recipient influences the likelihood of funding, I needed to remove
+                                     #these points from the data frame.
+loans <- loans %>%
+  filter(STATUS == "funded"|
+         STATUS == "expired")        #We want to include only the two major categories of loan status, which will then be our dependent variables. 
+
+loans <- 
+  loans %>%
+  filter(!is.na(FUNDED_AMOUNT)&
+         !is.na(LOAN_AMOUNT)&
+         !is.na(SECTOR_NAME)&
+         !is.na(LOAN_USE)&
+         !is.na(COUNTRY_NAME)&
+         !is.na(PARTNER_ID))        #I needed to remove empty data fields, to make sure each instance I will examine is not null.
+                                     #Demonstrating skill: removing NAs
+
+loans <- loans %>%                              #Partner ID is saved currently as a numeric variable, but this is not a continuous category, and should instead be viewed as a categorical variable or factor.
+  mutate(PARTNER_ID = as.factor(PARTNER_ID))     #Demonstrating skill: Recoding a variable
+                                               
+loans <- loans %>%
+  mutate(SHORT_AMOUNT = LOAN_AMOUNT - FUNDED_AMOUNT) #Create a new numeric data field showing how close the loan was to fully funded.
+                                                     #Demonstrating skill: Creating a numeric variable
+loans <- loans %>%
+  mutate(PCT_SHORT = SHORT_AMOUNT / LOAN_AMOUNT * 100) # Create a new numeric data field showing what share of the loan was not funded
+
+loans <- loans %>%
+  mutate(LOAN_USE_LENGTH =  nchar(LOAN_USE)) #Create a new numeric data field showing how long the description of the specific loan is.
+
+#Probably due to data entry errors, the data includes a very small number (approximately 10  in a dataset of over 1 million) of loans where their funding and requested amounts do not match the status of their loans. To fix this, I will split the data into two subgroups, remove these outliers, and then rejoin them in the data. Additionally, it is beneficial to have these two subsets as separate data frames for subsequent analysis.
+
+funded_loans <- loans %>%
+  filter(STATUS =="funded")
+funded_loans <- funded_loans %>%
+  filter(SHORT_AMOUNT == 0) #Address errors in the funded subset
+
+expired_loans <- loans %>%
+  filter(STATUS =="expired")
+
+expired_loans <- expired_loans %>%
+  filter(SHORT_AMOUNT > 0) #Address errors in the expired subset
+
+funded_and_expired_loans <- 
+  rbind(funded_loans, expired_loans) #Recombine the funded and expired subsets
+                                     #Demonstrated skill: Merging data frames (not separate datasets, but equivalent methods are used)
+
+funded_and_expired_loans <-
+  funded_and_expired_loans %>%
+  mutate(SEVERELY_SHORT = as.numeric(PCT_SHORT > median(expired_loans$PCT_SHORT))) #Create a numeric dummy vector showing whether a loan is among the 50% of expired loans with the highest percent off amount unfunded.
+                                                                                   #Demonstrated skill: Creating a dummy variable
+funded_loans <- 
+  funded_loans %>%
+  mutate(SEVERELY_SHORT = as.numeric(PCT_SHORT > median(expired_loans$PCT_SHORT)))
+expired_loans <- 
+  expired_loans %>%
+  mutate(SEVERELY_SHORT = as.numeric(PCT_SHORT > median(expired_loans$PCT_SHORT)))
+```
+
+# Visualizations and Analyses
+
+### Visualization 1: Distribution of loan statuses
+```{r}
+status_pie_chart <-
+  funded_and_expired_loans %>%
+  ggplot(aes(x = "", color = STATUS)) + #Set the color mapping to the status of the loan
+  geom_bar(position = "fill", fill = NA) + # Stack the bars on a bar chart, remove fill to minimize ink
+  coord_polar(theta = "y", start = pi/2) + #Set up polar system to convert to pie chart
+  theme(axis.text.x = element_blank(), #Remove unnecessary axis labels and background
+        axis.text.y = element_blank(), 
+        line = element_blank() ) +
+  scale_color_manual(values = c("#FF0000", "#009900"))+
+  labs(title = "Loans on Kiva.org by status",x = "", y ="", color = "Loan Status") #Create titles
+
+status_pie_chart #Display the chart
+
+ggsave("status_pie_chart.png", status_pie_chart, width = 8, height = 5) #Save the chart to a .png file
+
+```
+
+
+
+### Visualization 2: Relation between Loan Request Size and Status
+```{r}
+price_status_boxplot <- funded_and_expired_loans %>% #Create plot
+  filter(LOAN_AMOUNT < 7 * median(LOAN_AMOUNT)) %>% #Remove outliers to provide a usable scale
+  ggplot(aes(x = STATUS, y = LOAN_AMOUNT)) + #Set aesthetics to our two covariate variables
+  geom_boxplot(outlier.shape = NA) + #Set geometry, avoid graphing of outliers for readability
+  geom_jitter(shape=16, position=position_jitter(.1), size = .12, color = "#111111", alpha = .01) + #Create bar shading along the central axis of the chart, showing relative distribution of loans at higher resolution.
+  coord_flip() + #Switch to horizontal boxplots
+  labs(title = "Loan Prices by Status",x = "Loan Status", y = "Loan Amount") #Set titles
+
+price_status_boxplot #Display plot
+
+ggsave("price_status_boxplot.png", price_status_boxplot, width = 8, height = 5) #Save the chart to a .png file
+```
+
+
+### Visualization 3: Relation between Gender and Status
+```{r}
+loans_with_all_loan_status <- 
+  funded_and_expired_loans %>%
+  mutate(STATUS = "all") #Create new dataframe where all STATUS values are the same
+
+funded_and_expired_loans_with_aggregate <- 
+  rbind(funded_and_expired_loans, loans_with_all_loan_status) #Create new dataframe with equivalent data to funded_and_expired_loans but with duplicate instances to allow a new facet of total data (useful for relative comparisons).
+
+funded_and_expired_loans_with_aggregate %>%
+  ggplot(aes(x = "", color = BORROWER_GENDERS)) +
+  geom_bar(position = "fill", fill = NA) +
+  coord_polar("y") +
+  labs(title = "Loan Status By Gender", x = "", y = "", color = "Borrower Genders") +
+  scale_color_manual(values = c("#FF00FF","#0000FF")) +
+  theme(axis.text.x = element_blank(), 
+        axis.text.y = element_blank(), 
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank()) +
+  facet_wrap(~STATUS)
+```
+
+
+
+### Visualizations 4 and 5: Loan sector as influence on status
+```{r}
+funded_and_expired_loans %>%
+  mutate(SECTOR_NAME = fct_rev(fct_infreq(SECTOR_NAME))) %>% # Make order of columns match absolute scale in next visualization
+  ggplot(aes(x = SECTOR_NAME, fill = STATUS)) +
+  geom_bar(position = "fill") +
+  scale_fill_manual(values = c("#FF0000", "#009900")) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(title = "Loan status by sector", x = "Sector", y = "", fill = "Status") 
+```
+
+```{r}
+funded_and_expired_loans %>%
+  mutate(SECTOR_NAME = fct_rev(fct_infreq(SECTOR_NAME))) %>%
+  ggplot(aes(x = SECTOR_NAME, fill = STATUS)) +
+  geom_bar() +
+  scale_fill_manual(values = c("#FF0000", "#009900")) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(title = "Frequency of loans by sector", x = "sector", y ="Number of loans", fill = "Status")
+```
+
+### Visualizations 6 and 7: National factors as influences on loan funding.
+
+##### Merge in national data
+```{r}
+
+  gapminder_2007 <- gapminder %>%
+    filter(year == 2007)
+  matchable_loans_data <- loans %>%
+    filter(COUNTRY_NAME %in% gapminder_2007$country)
+  matchable_loans_data <- matchable_loans_data %>%
+    rename(country = COUNTRY_NAME)
+  
+  matched_loans_data <- left_join(matchable_loans_data, gapminder_2007) #Demonstrated skill: Merging two data sets.
+  
+  selected_funded_country_data <- matched_loans_data %>%
+    filter(STATUS == "funded") %>%
+    group_by(country) %>%
+    summarise(lifeExp = median(lifeExp), pop = median(pop), gdpPercap = median(gdpPercap), STATUS = "funded", count = length(country), continent = mode(continent))
+ 
+   selected_expired_country_data <- matched_loans_data %>%
+    filter(STATUS == "expired") %>%
+    group_by(country) %>%
+    summarise(lifeExp = median(lifeExp), pop = median(pop), gdpPercap = median(gdpPercap), STATUS = "expired", count = length(country), continent = mode(continent))
+  
+  selected_funded_country_data <- selected_funded_country_data %>%
+    filter(count > 100 &
+           country != "United States") #gdppercap is huge outlier
+  
+   selected_expired_country_data <-  selected_expired_country_data %>%
+    filter(count > 100)
+ 
+  selected_funded_country_data<-  selected_funded_country_data %>%
+    filter(country %in% selected_expired_country_data$country)
+  
+  selected_expired_country_data <- selected_expired_country_data %>%
+    filter(country %in% selected_funded_country_data$country)
+  
+  selected_funded_country_data <- 
+    selected_funded_country_data %>% 
+    rename(funded_count = count)
+  
+  
+  selected_expired_country_data <-
+  selected_expired_country_data %>%
+    rename(expired_count = count)
+  
+  selected_country_data <-
+    cbind(selected_funded_country_data, selected_expired_country_data$expired_count)
+  
+  selected_country_data <-
+    selected_country_data %>%
+    rename(expired_count = "selected_expired_country_data$expired_count")
+```
+
+##### Visualization 6: Per-capita GDP as related to percentage of loans funded.
+```{r}
+selected_country_data %>%
+    ggplot(aes(x = gdpPercap, y = 100 *funded_count/(funded_count+expired_count))) + #Set up aesthetics
+    geom_smooth(method = "lm", level = .99) + 
+    geom_smooth(method = "lm", level = .95) + #Create trend line with confidence intervals
+    geom_point() + #Create scatterplot
+    stat_poly_eq(formula = y~x, 
+                aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), 
+                parse = TRUE, label.y = 89) +  #Add regression equation
+    labs(title = "Percentage of loans funded as a function of per-capita GDP", 
+         x = "per-capita GDP", 
+         y = "Percentage of funded loans") #Add titles
+```
+
+
+##### Visualization 7: National Life expectancy as related to percentage of loans funded.
+```{r}
+selected_country_data %>%
+    ggplot(aes(x = lifeExp, y = 100 *funded_count/(funded_count+expired_count))) + #Set aesthetics
+    geom_smooth(method = "lm", level = .99) + 
+    geom_smooth(method = "lm", level = .95) + #Draw trend line with confidence intervals
+    geom_point() + #Draw scatter plot
+    stat_poly_eq(formula = y~x, 
+                aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), 
+                parse = TRUE, label.y = 89) +  #Add regression equation
+    labs(title = "Percentage of loans funded as a function of life expectancy", 
+         x = "Life expectancy", 
+         y = "Percentage of funded loans") #Add labels
+```
+
+
+# Final analyses and conclusions
+
+### Conclusions and results
+By analyzing the data I obtained from the kiva.org API, I did find some factors which influence how likely people are to behave philanthropically. As the data indicates and as are shown in the preceding visualizations, the amount of money requested, the gender of the recipient, and what the loan is being used for all significantly impact the likelihood of a loan being fully funded. Equally interesting, per-capita GDP and Life expectancy by country do not seem to significantly impact the rate of loans being funded, which together seems to signify that people are not as motivated by overall economic condition to donate, at least on an aggregated level. This does make sense, as the kiva.org platform is designed to focus on individuals, rather than trying to improve areas at large.
+
+### Ethical concerns
+In my research, I have not attempted to uniquely expose or identify individual recipients, preserving their anonymity. Additionally, the data was made freely available by the platform itself, and the data was willingly given by loan recipients to the platform. While this information was clearly not originally generated solely for my research, my research does not directly impact those using the Kiva platform and therefore does not generate any burdens or benefits. Additionally, I have provided access to my data directly, so that my results can be verified and repeated.
+
+### Confidence, limitations, and further research
+While my analyses and visualizations do show some clear insights, these insights are not necessarily generalizable - many of these may be in fact limited to behaviors unique to the Kiva.org platform. For example, the stark gender differences may be attributable to Kiva featuring women, and kiva encourages lending relatively small amounts, which may explain the increased average prices of expired loans. In other words, while my data certainly reveals information on the kiva ecosystem, kiva may not necessarily be an ideal model organism for all philanthropic behavior. Another reason for this is Kiva is specifically focused on a particular subset of philanthropic behavior - helping to alleviate global poverty. While this is certainly noble, this means it might not necessarily reflect behavior when choosing to donate to environmental causes, for example. More study of other platforms, both in this specific subset of philanthropy and of philanthropy at large, would be requisite for increasing the generalizability and insights of this research.
