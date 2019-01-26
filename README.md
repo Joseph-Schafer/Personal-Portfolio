@@ -10,3 +10,5 @@ This file is a playable version of the game "Rock Paper Scissors Lizard Spock" f
 This file is the prototype design for an app which I created at the Dubstech 2018 Protothon.
 ### Philanthropy_Research_Project.html/.rmd
 These files were created for my final research project for my sociology class, Data and Society, and present preliminary analysis on what motivates people to donate their money and resources to particular causes.
+### Lox Interpreter
+These Java files were written when I followed along with the tutorials in "Crafting Interpreters" by Bob Nystrom, and are an interpreter for the Lox programming language.
